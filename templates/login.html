@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Login – Structura AI{% endblock %}
+
+{% block head %}
+<style>
+  .auth-card {
+    box-shadow:
+      0 0 40px rgba(16,185,129,.12),
+      0 0 80px rgba(124,58,237,.08),
+      inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  .logo-glow {
+    box-shadow: 0 0 24px rgba(16,185,129,.55);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="min-h-[calc(100vh-80px)] flex items-center justify-center px-4 py-16">
+  <div class="glass auth-card w-full max-w-md rounded-2xl p-8 md:p-10" data-aos="fade-up">
+
+    <!-- Logo -->
+    <div class="flex flex-col items-center mb-8">
+      <img src="{{ url_for('static', filename='com_logo.png') }}"
+           alt="Structura AI"
+           class="h-16 w-16 rounded-full logo-glow mb-3 ring-2 ring-emerald-500/30" />
+      <h1 class="text-2xl font-extrabold gradient-text">Structura AI</h1>
+      <p class="text-gray-400 text-sm mt-1">Welcome back</p>
+    </div>
+
+    <!-- Error alert -->
+    {% if error %}
+    <div class="mb-5 flex items-start gap-3 bg-red-950/60 border border-red-500/40 text-red-300 px-4 py-3 rounded-xl text-sm">
+      <span class="text-red-400 mt-0.5">⚠</span>
+      <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Form -->
+    <form method="POST" action="/login" class="space-y-5">
+      <div>
+        <label for="username" class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+          Username
+        </label>
+        <input
+          id="username" type="text" name="username" required autocomplete="username"
+          class="input-field w-full px-4 py-3 rounded-xl text-sm text-gray-100 placeholder-gray-600"
+          placeholder="your_username"
+        />
+      </div>
+
+      <div>
+        <label for="password" class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+          Password
+        </label>
+        <div class="relative">
+          <input
+            id="password" type="password" name="password" required autocomplete="current-password"
+            class="input-field w-full px-4 py-3 pr-12 rounded-xl text-sm text-gray-100 placeholder-gray-600"
+            placeholder="••••••••"
+          />
+          <button type="button" id="togglePw"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-emerald-400 transition text-sm">
+            👁
+          </button>
+        </div>
+      </div>
+
+      <button type="submit"
+        class="btn-primary w-full py-3 rounded-xl text-sm mt-2">
+        Login →
+      </button>
+    </form>
+
+    <p class="mt-6 text-center text-sm text-gray-500">
+      Don't have an account?
+      <a href="/signup" class="text-emerald-400 hover:underline font-semibold">Sign Up</a>
+    </p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById('togglePw').addEventListener('click', function () {
+    const pw = document.getElementById('password');
+    pw.type = pw.type === 'password' ? 'text' : 'password';
+    this.textContent = pw.type === 'password' ? '👁' : '🙈';
+  });
+</script>
+{% endblock %}

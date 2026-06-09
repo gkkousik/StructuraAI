@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Structura AI – AI-Powered UML Generator{% endblock %}
+
+{% block head %}
+<style>
+  .hero-gradient {
+    background:
+      radial-gradient(ellipse 60% 50% at 20% 40%, rgba(16,185,129,.18), transparent),
+      radial-gradient(ellipse 60% 50% at 80% 60%, rgba(124,58,237,.18), transparent);
+  }
+  .feature-card {
+    transition: transform .3s, box-shadow .3s;
+  }
+  .feature-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 0 28px rgba(16,185,129,.25), 0 0 56px rgba(124,58,237,.15);
+  }
+  .stat-num {
+    font-size: 3rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #10b981, #7c3aed);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .step-line {
+    position: absolute;
+    top: 50%;
+    left: calc(50% + 2.5rem);
+    width: calc(100% - 5rem);
+    height: 1px;
+    background: linear-gradient(90deg, rgba(16,185,129,.4), rgba(124,58,237,.4));
+  }
+  .badge {
+    background: rgba(16,185,129,.1);
+    border: 1px solid rgba(16,185,129,.3);
+    color: #10b981;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    padding: .2rem .6rem;
+    border-radius: 999px;
+    text-transform: uppercase;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Hero ──────────────────────────────────────────────────────────────── -->
+<section class="hero-gradient relative min-h-[92vh] flex items-center justify-center px-6 text-center">
+  <div class="max-w-4xl mx-auto" data-aos="fade-up">
+    <div class="mb-6 flex justify-center">
+      <span class="badge">✦ AI-Powered · PlantUML</span>
+    </div>
+
+    <h1 class="text-5xl md:text-7xl font-extrabold leading-tight mb-6 glow">
+      Turn Ideas into<br />
+      <span class="gradient-text">UML Diagrams</span><br />
+      Instantly
+    </h1>
+
+    <p class="text-lg md:text-xl text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
+      Describe your system, pick a diagram type, choose a theme —
+      Structura AI generates precise, professional UML diagrams in seconds.
+    </p>
+
+    <div class="flex justify-center flex-wrap gap-4">
+      <a href="/signup"
+         class="btn-primary px-8 py-3.5 rounded-xl text-base shadow-lg shadow-emerald-900/40">
+        🚀 Start Generating Free
+      </a>
+      <a href="#how-it-works"
+         class="btn-secondary px-8 py-3.5 rounded-xl text-base">
+        See How It Works
+      </a>
+    </div>
+
+    <!-- Diagram types preview strip -->
+    <div class="mt-12 flex flex-wrap justify-center gap-2 text-xs text-gray-500">
+      {% for t in ["Class","Sequence","Use Case","Activity","Component","Deployment","State","ER","Mind Map"] %}
+        <span class="px-3 py-1 rounded-full bg-white/5 border border-white/8">{{ t }}</span>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+
+<!-- ── Features ──────────────────────────────────────────────────────────── -->
+<section id="features" class="py-28 px-6">
+  <div class="max-w-6xl mx-auto">
+    <div class="text-center mb-16" data-aos="fade-up">
+      <h2 class="text-3xl md:text-4xl font-extrabold mb-4 glow">
+        Everything you need to diagram faster
+      </h2>
+      <p class="text-gray-400 max-w-xl mx-auto">
+        From architecture reviews to onboarding docs — Structura AI handles the boilerplate so you focus on design.
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-8">
+      {% set features = [
+        ("⚡", "AI-Powered Generation", "emerald", "Understands your domain and writes syntactically correct PlantUML — no manual syntax needed."),
+        ("🎨", "15 Visual Themes", "violet", "From blueprint to cyberpunk, pick a theme that matches your brand or presentation style instantly."),
+        ("📐", "12 Diagram Types", "sky", "Sequence, Class, ER, Deployment, Mind Map and more — all following strict UML standards."),
+        ("💾", "Diagram History", "emerald", "Every generated diagram is saved. Browse, re-download, or delete your past creations anytime."),
+        ("📋", "One-Click Export", "violet", "Download PNG diagrams or copy PlantUML syntax directly to use in docs, wikis, or your IDE."),
+        ("🔒", "Secure Accounts", "sky", "Passwords are bcrypt-hashed. Sessions are server-signed. Your diagrams are yours alone."),
+      ] %}
+      {% for icon, title, color, desc in features %}
+        <div class="glass feature-card rounded-2xl p-7" data-aos="fade-up" data-aos-delay="{{ loop.index0 * 80 }}">
+          <div class="text-3xl mb-4">{{ icon }}</div>
+          <h3 class="text-lg font-bold text-{{ color }}-400 mb-2">{{ title }}</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">{{ desc }}</p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+
+<!-- ── How it works ───────────────────────────────────────────────────────── -->
+<section id="how-it-works" class="py-28 px-6 bg-gradient-to-b from-transparent to-black/40">
+  <div class="max-w-4xl mx-auto text-center">
+    <h2 class="text-3xl md:text-4xl font-extrabold mb-16 glow" data-aos="zoom-in">
+      From prompt to diagram in 3 steps
+    </h2>
+
+    <div class="grid md:grid-cols-3 gap-10 relative">
+      <!-- connector line visible on md+ -->
+      <div class="hidden md:block absolute top-8 left-[calc(16.67%+1rem)] right-[calc(16.67%+1rem)] h-px bg-gradient-to-r from-emerald-500/30 via-violet-500/30 to-sky-500/30"></div>
+
+      {% for step, label, desc in [
+          ("01", "Name Your Project", "Enter a project title — like 'E-commerce Backend' or 'Auth Service'."),
+          ("02", "Pick Diagram & Theme", "Choose from 12 UML types and 15 visual themes to match your style."),
+          ("03", "Generate & Export", "Claude generates the diagram. Download the PNG or copy the syntax."),
+      ] %}
+        <div class="glass rounded-2xl p-7 text-center" data-aos="fade-up" data-aos-delay="{{ loop.index0 * 120 }}">
+          <div class="text-4xl font-extrabold gradient-text mb-3">{{ step }}</div>
+          <h3 class="font-bold text-white mb-2">{{ label }}</h3>
+          <p class="text-gray-400 text-sm">{{ desc }}</p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+
+<!-- ── Stats ──────────────────────────────────────────────────────────────── -->
+<section class="py-28 px-6">
+  <div class="max-w-5xl mx-auto">
+    <div class="glass rounded-3xl p-10 grid md:grid-cols-3 gap-10 text-center" data-aos="fade-up">
+      {% for num, label in [("12+", "Diagram Types"), ("15", "Visual Themes"), ("< 15s", "Avg Generation Time")] %}
+        <div>
+          <div class="stat-num">{{ num }}</div>
+          <p class="text-gray-400 mt-1 text-sm font-medium">{{ label }}</p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+
+<!-- ── CTA ────────────────────────────────────────────────────────────────── -->
+<section class="py-24 px-6 text-center">
+  <div class="max-w-2xl mx-auto" data-aos="zoom-in">
+    <h2 class="text-3xl md:text-4xl font-extrabold mb-6 glow">
+      Ready to diagram smarter?
+    </h2>
+    <p class="text-gray-400 mb-8">
+      Create a free account and generate your first UML diagram in under a minute.
+    </p>
+    <a href="/signup" class="btn-primary px-10 py-4 rounded-xl text-base inline-block shadow-xl shadow-emerald-900/30">
+      Get Started — It's Free
+    </a>
+  </div>
+</section>
+
+{% endblock %}

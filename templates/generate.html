@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block title %}UML Generator – Structura AI{% endblock %}
+
+{% block head %}
+<style>
+  .panel { box-shadow: 0 0 30px rgba(16,185,129,.08), 0 0 60px rgba(124,58,237,.06); }
+  .diagram-preview {
+    background: repeating-conic-gradient(rgba(255,255,255,.02) 0% 25%,transparent 0% 50%) 0 0/20px 20px,rgba(5,10,20,.6);
+    min-height:300px; display:flex; align-items:center; justify-content:center;
+  }
+  .select-field {
+    background:rgba(10,15,30,.8); border:1px solid rgba(255,255,255,.1);
+    transition:border-color .2s,box-shadow .2s; appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2310b981' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 14px center; padding-right:40px;
+  }
+  .select-field:focus { outline:none; border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,.2); }
+
+  /* Theme swatches */
+  .theme-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  .theme-btn {
+    padding:10px 8px; border-radius:10px; font-size:.72rem; font-weight:700;
+    cursor:pointer; border:2px solid transparent; transition:all .2s;
+    text-align:center; letter-spacing:.03em; line-height:1.3;
+  }
+  .theme-btn:hover   { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.4); }
+  .theme-btn.active  { border-color:#10b981 !important; box-shadow:0 0 0 3px rgba(16,185,129,.35) !important; }
+
+  /* Each theme swatch — matches the actual diagram palette */
+  .t-default         { background:#1e293b; color:#94a3b8; border-color:#334155; }
+  .t-classic-blue    { background:#E3F2FD; color:#0D47A1; border-color:#1565C0; }
+  .t-dark-neon       { background:#0d1117; color:#00ff88; border-color:#00ff88; }
+  .t-sunset-orange   { background:#FFE0B2; color:#BF360C; border-color:#E65100; }
+  .t-forest-green    { background:#C8E6C9; color:#1B5E20; border-color:#2E7D32; }
+  .t-royal-purple    { background:#E1BEE7; color:#4A148C; border-color:#6A1B9A; }
+  .t-midnight-dark   { background:#1a1a2e; color:#eaeaea; border-color:#e94560; }
+  .t-ocean-teal      { background:#B2EBF2; color:#004D40; border-color:#00695C; }
+  .t-rose-gold       { background:#F8BBD9; color:#880E4F; border-color:#C2185B; }
+
+  .spinner { width:44px;height:44px;border:3px solid rgba(255,255,255,.08);
+    border-top-color:#10b981;border-radius:50%;animation:spin .8s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg);} }
+  pre { font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.6;
+    white-space:pre-wrap;word-break:break-all;max-height:320px;overflow-y:auto; }
+  .tag-pill { font-size:.65rem;padding:.15rem .5rem;border-radius:999px;
+    background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.25);
+    color:#6ee7b7;font-weight:600;text-transform:uppercase;letter-spacing:.05em; }
+  .fade-in { animation:fadeIn .6s ease forwards; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+
+  <div class="mb-8 flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-extrabold gradient-text">UML Generator</h1>
+      <p class="text-gray-400 text-sm mt-0.5">Powered by Groq AI · PlantUML renderer</p>
+    </div>
+    <div class="flex items-center gap-3 text-sm">
+      <span class="tag-pill">{{ username }}</span>
+      <a href="/history" class="btn-secondary px-4 py-1.5 rounded-lg text-xs">📂 History</a>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+    <!-- Left panel -->
+    <div class="glass panel rounded-2xl p-6 lg:col-span-2 h-fit">
+      <h2 class="text-lg font-bold text-emerald-400 mb-5">Configure Diagram</h2>
+      <form id="diagramForm" class="space-y-5">
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Project Title</label>
+          <input type="text" id="project_name" name="project_name" required
+            placeholder="e.g. E-commerce Platform"
+            class="input-field w-full px-4 py-3 rounded-xl text-sm text-gray-100 placeholder-gray-600" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Diagram Type</label>
+          <select id="diagram_type" name="diagram_type" required
+            class="select-field input-field w-full px-4 py-3 rounded-xl text-sm text-gray-100">
+            {% for t in diagram_types %}
+              <option value="{{ t }}">{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Theme swatches -->
+        <div>
+          <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Visual Theme</label>
+          <input type="hidden" id="theme" name="theme" value="" />
+          <div class="theme-grid">
+            <button type="button" class="theme-btn t-default active" data-theme="">
+              ⬜ Default
+            </button>
+            {% set swatch_map = {
+              'Classic Blue':   't-classic-blue',
+              'Dark Neon':      't-dark-neon',
+              'Sunset Orange':  't-sunset-orange',
+              'Forest Green':   't-forest-green',
+              'Royal Purple':   't-royal-purple',
+              'Midnight Dark':  't-midnight-dark',
+              'Ocean Teal':     't-ocean-teal',
+              'Rose Gold':      't-rose-gold',
+            } %}
+            {% set icons = {
+              'Classic Blue':   '🔵',
+              'Dark Neon':      '🟢',
+              'Sunset Orange':  '🟠',
+              'Forest Green':   '🌿',
+              'Royal Purple':   '🟣',
+              'Midnight Dark':  '🔴',
+              'Ocean Teal':     '🩵',
+              'Rose Gold':      '🌸',
+            } %}
+            {% for theme in themes %}
+              <button type="button"
+                class="theme-btn {{ swatch_map.get(theme, '') }}"
+                data-theme="{{ theme }}">
+                {{ icons.get(theme, '●') }} {{ theme }}
+              </button>
+            {% endfor %}
+          </div>
+        </div>
+
+        <button type="submit" id="generateBtn"
+          class="btn-primary w-full py-3 rounded-xl text-sm mt-2 flex items-center justify-center gap-2">
+          <span id="btnIcon">✦</span>
+          <span id="btnText">Generate Diagram</span>
+        </button>
+      </form>
+
+      <div id="errorBox" class="hidden mt-4 flex items-start gap-3 bg-red-950/60 border border-red-500/40 text-red-300 px-4 py-3 rounded-xl text-sm">
+        <span class="text-red-400 mt-0.5 shrink-0">⚠</span>
+        <span id="errorMsg"></span>
+      </div>
+
+      <div class="mt-6 pt-5 border-t border-white/5">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">💡 Tips</p>
+        <ul class="space-y-2 text-xs text-gray-500">
+          <li>• Be specific: <em>"Payment Microservice"</em> beats <em>"App"</em></li>
+          <li>• Class diagrams work best for backend architecture</li>
+          <li>• Sequence diagrams are ideal for API flows</li>
+          <li>• Dark Neon &amp; Midnight Dark look great for presentations</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="lg:col-span-3 space-y-5">
+
+      <div id="loadingState" class="hidden glass rounded-2xl p-12 flex flex-col items-center justify-center gap-4">
+        <div class="spinner"></div>
+        <p class="text-gray-400 text-sm font-medium" id="loadingMsg">Connecting to API…</p>
+        <p class="text-gray-600 text-xs">This may take 5–15 seconds</p>
+      </div>
+
+      <div id="emptyState" class="glass panel rounded-2xl diagram-preview flex-col gap-3">
+        <p class="text-5xl">📐</p>
+        <p class="text-gray-500 text-sm">Your generated diagram will appear here</p>
+        <p class="text-gray-600 text-xs">Fill in the form and click Generate</p>
+      </div>
+
+      <div id="diagramResult" class="hidden glass panel rounded-2xl p-6 fade-in">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <div>
+            <h3 class="text-base font-bold text-emerald-400">Generated Diagram</h3>
+            <p id="diagramMeta" class="text-xs text-gray-500 mt-0.5"></p>
+          </div>
+          <button id="downloadBtn" class="btn-secondary px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5">
+            ⬇ Download PNG
+          </button>
+        </div>
+        <div class="diagram-preview rounded-xl overflow-hidden">
+          <img id="diagramImg" alt="Generated UML Diagram"
+               class="max-w-full h-auto rounded-xl border border-white/8" />
+        </div>
+      </div>
+
+      <div id="syntaxResult" class="hidden glass panel rounded-2xl p-6 fade-in">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-base font-bold text-emerald-400">PlantUML Syntax</h3>
+          <button id="copyBtn" class="btn-secondary px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5">
+            📋 Copy Code
+          </button>
+        </div>
+        <pre id="syntaxCode" class="bg-black/40 p-4 rounded-xl text-gray-300 border border-white/6"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const themeInput = document.getElementById('theme');
+  document.querySelectorAll('.theme-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      themeInput.value = btn.dataset.theme;
+    });
+  });
+
+  const form=document.getElementById('diagramForm'),
+        generateBtn=document.getElementById('generateBtn'),
+        btnText=document.getElementById('btnText'),
+        btnIcon=document.getElementById('btnIcon'),
+        loadingState=document.getElementById('loadingState'),
+        loadingMsg=document.getElementById('loadingMsg'),
+        emptyState=document.getElementById('emptyState'),
+        errorBox=document.getElementById('errorBox'),
+        errorMsg=document.getElementById('errorMsg'),
+        diagramResult=document.getElementById('diagramResult'),
+        diagramImg=document.getElementById('diagramImg'),
+        diagramMeta=document.getElementById('diagramMeta'),
+        syntaxResult=document.getElementById('syntaxResult'),
+        syntaxCode=document.getElementById('syntaxCode');
+
+  const MSGS=['Connecting to API…','Generating diagram syntax…','Rendering your diagram…','Almost ready…'];
+  let msgTimer;
+
+  function setLoading(on){
+    generateBtn.disabled=on;
+    btnText.textContent=on?'Generating…':'Generate Diagram';
+    btnIcon.textContent=on?'⏳':'✦';
+    if(on){
+      loadingState.classList.remove('hidden');
+      emptyState.classList.add('hidden');
+      diagramResult.classList.add('hidden');
+      syntaxResult.classList.add('hidden');
+      errorBox.classList.add('hidden');
+      let i=0; loadingMsg.textContent=MSGS[0];
+      msgTimer=setInterval(()=>{ i=(i+1)%MSGS.length; loadingMsg.textContent=MSGS[i]; },3500);
+    } else {
+      clearInterval(msgTimer);
+      loadingState.classList.add('hidden');
+    }
+  }
+
+  form.addEventListener('submit', async e=>{
+    e.preventDefault(); setLoading(true);
+    try {
+      const fd=new FormData(form);
+      const res=await fetch('/generate',{method:'POST',body:fd});
+      const data=await res.json();
+      if(!res.ok) throw new Error(data.error||'Generation failed');
+      diagramImg.src=`data:image/png;base64,${data.diagram}`;
+      const selectedTheme=themeInput.value||'Default';
+      diagramMeta.textContent=`${fd.get('diagram_type')} · ${selectedTheme} · ${fd.get('project_name')}`;
+      diagramResult.classList.remove('hidden');
+      syntaxCode.textContent=data.syntax;
+      syntaxResult.classList.remove('hidden');
+      showToast('Diagram generated!','success');
+    } catch(err){
+      errorMsg.textContent=err.message;
+      errorBox.classList.remove('hidden');
+      emptyState.classList.remove('hidden');
+      showToast(err.message,'error');
+    } finally { setLoading(false); }
+  });
+
+  document.getElementById('downloadBtn').addEventListener('click',()=>{
+    const proj=document.getElementById('project_name').value||'diagram';
+    const type=document.getElementById('diagram_type').value.replace(/\s+/g,'_');
+    const a=document.createElement('a');
+    a.download=`${proj}_${type}.png`.replace(/\s+/g,'_').toLowerCase();
+    a.href=diagramImg.src; a.click();
+    showToast('PNG downloaded!','success');
+  });
+
+  document.getElementById('copyBtn').addEventListener('click',async()=>{
+    try { await navigator.clipboard.writeText(syntaxCode.textContent); showToast('Syntax copied!','success'); }
+    catch { showToast('Copy failed — select text manually.','error'); }
+  });
+</script>
+{% endblock %}

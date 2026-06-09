@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Structura AI{% endblock %}</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- AOS animations -->
+  <link rel="stylesheet" href="https://unpkg.com/aos@2.3.1/dist/aos.css" />
+
+  <!-- Google Fonts: Space Grotesk + JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --emerald: #10b981;
+      --violet:  #7c3aed;
+      --sky:     #0ea5e9;
+      --bg:      #030712;
+      --surface: rgba(15,20,30,0.75);
+      --border:  rgba(255,255,255,0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: 'Syne', sans-serif;
+      background-color: var(--bg);
+      color: #e2e8f0;
+    }
+
+    /* ── Glassmorphism ─────────────────────────────────── */
+    .glass {
+      background: var(--surface);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+    }
+
+    /* ── Glow text ──────────────────────────────────────── */
+    .glow {
+      text-shadow:
+        0 0 18px rgba(16,185,129,.6),
+        0 0 36px rgba(124,58,237,.4);
+    }
+
+    /* ── Gradient text ──────────────────────────────────── */
+    .gradient-text {
+      background: linear-gradient(135deg, var(--emerald), var(--sky));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* ── Particle canvas ────────────────────────────────── */
+    #bg-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* ── Scrollbar ──────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0a0f1a; }
+    ::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 3px; }
+
+    /* ── Input focus ring ───────────────────────────────── */
+    .input-field {
+      background: rgba(10,15,30,0.8);
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .input-field:focus {
+      outline: none;
+      border-color: var(--emerald);
+      box-shadow: 0 0 0 3px rgba(16,185,129,.2);
+    }
+
+    /* ── Buttons ────────────────────────────────────────── */
+    .btn-primary {
+      background: linear-gradient(135deg, #059669, #10b981);
+      color: #000;
+      font-weight: 700;
+      transition: filter .2s, transform .15s;
+    }
+    .btn-primary:hover { filter: brightness(1.12); transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+
+    .btn-secondary {
+      background: rgba(124,58,237,.15);
+      border: 1px solid rgba(124,58,237,.4);
+      color: #a78bfa;
+      transition: background .2s, transform .15s;
+    }
+    .btn-secondary:hover { background: rgba(124,58,237,.3); transform: translateY(-1px); }
+
+    /* ── Mono code ──────────────────────────────────────── */
+    pre, code, .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* ── Navbar ─────────────────────────────────────────── */
+    .navbar {
+      background: rgba(3,7,18,0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ── Toast ──────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      padding: .75rem 1.25rem;
+      border-radius: .5rem;
+      font-size: .875rem;
+      font-weight: 600;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity .3s, transform .3s;
+      z-index: 9999;
+      pointer-events: none;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    #toast.success { background: #065f46; border: 1px solid #10b981; color: #a7f3d0; }
+    #toast.error   { background: #7f1d1d; border: 1px solid #ef4444; color: #fecaca; }
+  </style>
+
+  {% block head %}{% endblock %}
+</head>
+
+<body class="antialiased overflow-x-hidden">
+
+  <!-- Shared animated particle background -->
+  <canvas id="bg-canvas"></canvas>
+  <div class="fixed inset-0 bg-black/65 z-0 pointer-events-none"></div>
+
+  <!-- ── Navbar ────────────────────────────────────────── -->
+  <nav class="navbar fixed top-0 inset-x-0 z-50 px-6 py-4 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-3">
+      <img src="{{ url_for('static', filename='com_logo.png') }}"
+           alt="Structura AI" class="h-8 w-8 rounded-full ring-1 ring-emerald-500/40" />
+      <span class="font-extrabold text-lg tracking-tight gradient-text">Structura AI</span>
+    </a>
+
+    <div class="flex items-center gap-4 text-sm">
+      {% if session.get('username') %}
+        <span class="text-gray-400 hidden sm:block">
+          👤 {{ session['username'] }}
+        </span>
+        <a href="/try" class="text-gray-300 hover:text-emerald-400 transition">Generator</a>
+        <a href="/history" class="text-gray-300 hover:text-emerald-400 transition">History</a>
+        <a href="/logout"
+           class="btn-secondary px-4 py-1.5 rounded-lg text-xs">Logout</a>
+      {% else %}
+        <a href="/login"  class="text-gray-300 hover:text-emerald-400 transition">Login</a>
+        <a href="/signup" class="btn-primary px-4 py-1.5 rounded-lg text-xs">Sign Up</a>
+      {% endif %}
+    </div>
+  </nav>
+
+  <!-- ── Page content ───────────────────────────────────── -->
+  <main class="relative z-10 pt-20">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- ── Footer ────────────────────────────────────────── -->
+  <footer class="relative z-10 border-t border-white/5 py-8 mt-16">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-gray-500">
+      <p>© 2025 Structura AI · Built with Flask, Claude AI &amp; PlantUML</p>
+      <div class="flex gap-6">
+        <a href="#" class="hover:text-emerald-400 transition">Privacy</a>
+        <a href="#" class="hover:text-emerald-400 transition">Terms</a>
+        <a href="https://github.com" target="_blank" class="hover:text-emerald-400 transition">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ── Toast ─────────────────────────────────────────── -->
+  <div id="toast"></div>
+
+  <!-- ── Shared scripts ─────────────────────────────────── -->
+  <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+  <script>AOS.init({ duration: 900, once: true, offset: 60 });</script>
+
+  <script>
+    // ── Particle canvas (shared, one instance) ──────────────────────────────
+    (function () {
+      const canvas = document.getElementById('bg-canvas');
+      const ctx    = canvas.getContext('2d');
+      let W, H, particles = [];
+
+      const COLORS = ['rgba(16,185,129,.5)', 'rgba(124,58,237,.4)', 'rgba(14,165,233,.4)'];
+
+      function resize() {
+        W = canvas.width  = window.innerWidth;
+        H = canvas.height = window.innerHeight;
+      }
+
+      class Particle {
+        constructor() { this.reset(); }
+        reset() {
+          this.x     = Math.random() * W;
+          this.y     = Math.random() * H;
+          this.r     = Math.random() * 1.5 + .5;
+          this.dx    = (Math.random() - .5) * .8;
+          this.dy    = (Math.random() - .5) * .8;
+          this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+        }
+        step() {
+          this.x += this.dx;
+          this.y += this.dy;
+          if (this.x < 0 || this.x > W) this.dx *= -1;
+          if (this.y < 0 || this.y > H) this.dy *= -1;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+          ctx.fillStyle = this.color;
+          ctx.fill();
+        }
+      }
+
+      function init() {
+        resize();
+        particles = Array.from({ length: 70 }, () => new Particle());
+      }
+
+      function loop() {
+        ctx.clearRect(0, 0, W, H);
+        particles.forEach(p => p.step());
+        requestAnimationFrame(loop);
+      }
+
+      window.addEventListener('resize', () => { resize(); particles.forEach(p => p.reset()); });
+      init();
+      loop();
+    })();
+
+    // ── Toast helper ────────────────────────────────────────────────────────
+    function showToast(msg, type = 'success') {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className   = `show ${type}`;
+      clearTimeout(el._t);
+      el._t = setTimeout(() => { el.className = type; }, 3200);
+    }
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>
