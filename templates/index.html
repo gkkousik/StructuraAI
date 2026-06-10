@@ -132,7 +132,7 @@
 
       {% for step, label, desc in [
           ("01", "Name Your Project", "Enter a project title — like 'E-commerce Backend' or 'Auth Service'."),
-          ("02", "Pick Diagram & Theme", "Choose from 12 UML types and 15 visual themes to match your style."),
+          ("02", "Pick Diagram & Theme", "Choose from 10 UML types and 9 visual themes to match your style."),
           ("03", "Generate & Export", "Claude generates the diagram. Download the PNG or copy the syntax."),
       ] %}
         <div class="glass rounded-2xl p-7 text-center" data-aos="fade-up" data-aos-delay="{{ loop.index0 * 120 }}">
@@ -150,7 +150,7 @@
 <section class="py-28 px-6">
   <div class="max-w-5xl mx-auto">
     <div class="glass rounded-3xl p-10 grid md:grid-cols-3 gap-10 text-center" data-aos="fade-up">
-      {% for num, label in [("12+", "Diagram Types"), ("15", "Visual Themes"), ("< 15s", "Avg Generation Time")] %}
+      {% for num, label in [("10", "Diagram Types"), ("9", "Visual Themes"), ("< 15s", "Avg Generation Time")] %}
         <div>
           <div class="stat-num">{{ num }}</div>
           <p class="text-gray-400 mt-1 text-sm font-medium">{{ label }}</p>
