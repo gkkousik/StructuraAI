@@ -20,9 +20,13 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 # Uses PostgreSQL on Render (DATABASE_URL env var set automatically)
 # Falls back to SQLite locally — zero code change needed
 DATABASE_URL = os.environ.get('DATABASE_URL', '')
-if DATABASE_URL.startswith('postgres://'):
-    # Render gives postgres:// but SQLAlchemy needs postgresql://
-    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+if DATABASE_URL:
+    # pg8000 is a pure-Python PostgreSQL driver — no C extensions,
+    # works on every Python version including 3.14+
+    if DATABASE_URL.startswith('postgres://'):
+        DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql+pg8000://', 1)
+    elif DATABASE_URL.startswith('postgresql://'):
+        DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+pg8000://', 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or \
     f"sqlite:///{os.path.join(os.path.dirname(__file__), 'structura.db')}"
