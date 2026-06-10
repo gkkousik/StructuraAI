@@ -4,27 +4,88 @@ from flask import (
     Flask, render_template, request, redirect,
     url_for, session, jsonify, send_from_directory
 )
+from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# ── Config ─────────────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.config['SECRET_KEY']         = os.environ.get('SECRET_KEY', 'structura-dev-secret')
 app.config['UPLOAD_FOLDER']      = os.path.join('static', 'diagrams')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-USERS_FILE   = 'users.json'
-HISTORY_FILE = 'history.json'
-GROQ_KEY     = os.environ.get('GROQ_API_KEY', '')
+# ── Database ───────────────────────────────────────────────────────────────────
+# Uses PostgreSQL on Render (DATABASE_URL env var set automatically)
+# Falls back to SQLite locally — zero code change needed
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
+if DATABASE_URL.startswith('postgres://'):
+    # Render gives postgres:// but SQLAlchemy needs postgresql://
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or \
+    f"sqlite:///{os.path.join(os.path.dirname(__file__), 'structura.db')}"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+UPLOAD_FOLDER = app.config['UPLOAD_FOLDER']
+GROQ_KEY      = os.environ.get('GROQ_API_KEY', '')
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# THEMES  — pure skinparam, no !theme, guaranteed readable
+# Database Models
+# ══════════════════════════════════════════════════════════════════════════════
+
+class User(db.Model):
+    __tablename__ = 'users'
+    id         = db.Column(db.Integer, primary_key=True)
+    username   = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    email      = db.Column(db.String(120), unique=True, nullable=False)
+    password   = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    diagrams   = db.relationship('Diagram', backref='user', lazy=True,
+                                 cascade='all, delete-orphan')
+
+class Diagram(db.Model):
+    __tablename__ = 'diagrams'
+    id           = db.Column(db.String(36), primary_key=True,
+                             default=lambda: str(uuid.uuid4()))
+    user_id      = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    project      = db.Column(db.String(200), nullable=False)
+    diagram_type = db.Column(db.String(100), nullable=False)
+    theme        = db.Column(db.String(100), default='Default')
+    syntax       = db.Column(db.Text, nullable=False)
+    image_path   = db.Column(db.String(200), nullable=False)
+    created_at   = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id':           self.id,
+            'username':     self.user.username,
+            'project':      self.project,
+            'diagram_type': self.diagram_type,
+            'theme':        self.theme,
+            'syntax':       self.syntax,
+            'image_path':   self.image_path,
+            'created_at':   self.created_at.isoformat() + 'Z',
+        }
+
+
+# ── Create tables on startup ────────────────────────────────────────────────
+with app.app_context():
+    db.create_all()
+    logger.info("[db] Tables ready — %s",
+                app.config['SQLALCHEMY_DATABASE_URI'].split('://')[0])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# THEMES — pure skinparam, no !theme, guaranteed readable
 # ══════════════════════════════════════════════════════════════════════════════
 
 THEMES = {
@@ -459,7 +520,7 @@ def get_theme_skinparam(theme_name):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PlantUML renderer — direct HTTP, no plantuml library
+# PlantUML renderer
 # ══════════════════════════════════════════════════════════════════════════════
 
 _PU_ALPHA  = string.digits + string.ascii_uppercase + string.ascii_lowercase + '-_'
@@ -476,10 +537,10 @@ def _encode(text):
     return base64.b64encode(zlib.compress(text.encode('utf-8'))[2:-4]).translate(_TRANS).decode()
 
 def render_diagram(syntax):
-    full       = syntax.strip() if syntax.strip().startswith('@start') else f"@startuml\n{syntax}\n@enduml"
+    full       = syntax.strip() if syntax.strip().startswith('@start') \
+                 else f"@startuml\n{syntax}\n@enduml"
     encoded    = _encode(full)
     last_error = 'No server tried'
-
     for server in PLANTUML_SERVERS:
         url = server + encoded
         try:
@@ -488,18 +549,14 @@ def render_diagram(syntax):
                 if resp.content[:4] == b'\x89PNG':
                     logger.info("[plantuml] OK via %s (%d B)", server, len(resp.content))
                     return resp.content
-                # 200 but not PNG = PlantUML syntax error image — still return it
-                logger.warning("[plantuml] 200 non-PNG via %s", server)
                 return resp.content
             last_error = f"HTTP {resp.status_code} from {server}"
-            logger.warning("[plantuml] %s", last_error)
         except requests.Timeout:
             last_error = f"Timeout on {server}"
         except requests.ConnectionError as e:
             last_error = f"Connection error: {e}"
         except Exception as e:
             last_error = str(e)
-
     raise RuntimeError(
         f"PlantUML server unreachable. {last_error}. "
         "Check your internet connection and try again."
@@ -508,38 +565,26 @@ def render_diagram(syntax):
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Syntax cleaner
-# KEY FIX: convert double braces {{ }} → single { } that PlantUML requires
-# Also strips any !theme lines the AI adds, injects our skinparam block
 # ══════════════════════════════════════════════════════════════════════════════
 
 def clean_syntax(raw, theme_skinparam):
     text = raw.strip()
-
-    # Strip markdown fences
     text = re.sub(r'^```[a-zA-Z]*\s*', '', text, flags=re.MULTILINE)
-    text = re.sub(r'```\s*$',           '', text, flags=re.MULTILINE)
+    text = re.sub(r'```\s*$', '', text, flags=re.MULTILINE)
     text = text.strip()
-
-    # Extract the full @startuml...@enduml block
     for open_tag, close_tag in [('@startuml', '@enduml'), ('@startmindmap', '@endmindmap')]:
         pat = rf'({re.escape(open_tag)}.*?{re.escape(close_tag)})'
         m   = re.search(pat, text, re.DOTALL | re.IGNORECASE)
         if m:
             block = m.group(1).strip()
-            # Remove any !theme lines the AI added
             block = re.sub(r'!theme\s+\S+\n?', '', block)
-            # FIX: convert double braces {{ }} to single { }
             block = block.replace('{{', '{').replace('}}', '}')
-            # Inject our skinparam block right after @startuml
             if theme_skinparam and open_tag == '@startuml':
                 block = block.replace('@startuml', f'@startuml\n{theme_skinparam}', 1)
             return block
-
-    # Fallback: treat whole response as inner content
     inner = re.sub(r'@start\w+\s*', '', text, flags=re.IGNORECASE)
-    inner = re.sub(r'@end\w+\s*',   '', inner, flags=re.IGNORECASE)
+    inner = re.sub(r'@end\w+\s*', '', inner, flags=re.IGNORECASE)
     inner = re.sub(r'!theme\s+\S+\n?', '', inner)
-    # FIX: double braces in fallback too
     inner = inner.replace('{{', '{').replace('}}', '}').strip()
     if not inner:
         raise ValueError("AI returned empty diagram content — please try again.")
@@ -548,8 +593,7 @@ def clean_syntax(raw, theme_skinparam):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Diagram types and prompt templates
-# CRITICAL: use single { } braces — .replace() is used, NOT .format()
+# Catalogue + Prompts
 # ══════════════════════════════════════════════════════════════════════════════
 
 DIAGRAM_TYPES = [
@@ -559,13 +603,10 @@ DIAGRAM_TYPES = [
     "Entity Relationship Diagram",
 ]
 
-# NOTE: All { } below are SINGLE braces — intentional, safe with .replace()
 DIAGRAM_PROMPTS = {
-
 "Sequence Diagram":
 """Create a detailed PlantUML Sequence Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use this structure and replace content for 'PROJECT_NAME':
 @startuml
 skinparam responseMessageBelowArrow true
 actor User
@@ -590,7 +631,6 @@ Make it realistic for 'PROJECT_NAME' with 5-8 participants and messages.""",
 "Use Case Diagram":
 """Create a detailed PlantUML Use Case Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use this structure:
 @startuml
 left to right direction
 actor "Customer" as customer
@@ -619,7 +659,6 @@ Replace with 6-8 realistic use cases for 'PROJECT_NAME'. Use single braces only.
 "Class Diagram":
 """Create a detailed PlantUML Class Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use this structure:
 @startuml
 skinparam classAttributeIconSize 0
 class UserService {
@@ -627,21 +666,17 @@ class UserService {
   +findById(id: Long): User
   +save(user: User): User
   +delete(id: Long): void
-  +findAll(): List
 }
 class User {
   -id: Long
   -name: String
   -email: String
-  -createdAt: Date
   +getId(): Long
   +getName(): String
-  +setName(name: String): void
 }
 interface UserRepository {
   +findById(id: Long): User
   +save(user: User): User
-  +deleteById(id: Long): void
 }
 UserService --> User : manages
 UserService ..|> UserRepository : implements
@@ -651,35 +686,30 @@ Replace with 5-7 realistic classes for 'PROJECT_NAME'. Use single braces only.""
 "Object Diagram":
 """Create a detailed PlantUML Object Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use this structure - IMPORTANT use single braces { } not double:
 @startuml
 object "alice : User" as alice {
   id = 1
   name = "Alice Smith"
   email = "alice@example.com"
-  role = "CUSTOMER"
 }
 object "order101 : Order" as order101 {
   id = 101
   status = "PROCESSING"
   total = 299.99
-  createdAt = "2024-01-15"
 }
 object "laptop : Product" as laptop {
   id = 201
   name = "Pro Laptop"
   price = 299.99
-  stock = 15
 }
 alice --> order101 : places
 order101 --> laptop : contains
 @enduml
-Replace with realistic objects for 'PROJECT_NAME'. Use single braces { } only.""",
+Replace with realistic objects for 'PROJECT_NAME'. Use single braces only.""",
 
 "Activity Diagram":
 """Create a detailed PlantUML Activity Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use this structure:
 @startuml
 start
 :Receive Request;
@@ -704,7 +734,6 @@ Replace with a realistic workflow for 'PROJECT_NAME' with 8-12 steps.""",
 "Component Diagram":
 """Create a detailed PlantUML Component Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use this structure - IMPORTANT use single braces { } not double:
 @startuml
 skinparam componentStyle rectangle
 package "Frontend" {
@@ -715,12 +744,10 @@ package "Backend Services" {
   [API Gateway] as GW
   [Auth Service] as AUTH
   [Business Service] as BIZ
-  [Notification Service] as NOTIF
 }
 package "Data Layer" {
   database "Main Database" as DB
   database "Cache" as CACHE
-  queue "Message Queue" as MQ
 }
 WEB --> GW : HTTPS
 MOB --> GW : HTTPS
@@ -728,15 +755,12 @@ GW --> AUTH : JWT Validate
 GW --> BIZ : Route Request
 BIZ --> DB : Read/Write
 BIZ --> CACHE : Cache
-BIZ --> MQ : Publish Event
-MQ --> NOTIF : Consume
 @enduml
-Replace with components for 'PROJECT_NAME'. Use single braces { } only.""",
+Replace with components for 'PROJECT_NAME'. Use single braces only.""",
 
 "Deployment Diagram":
 """Create a detailed PlantUML Deployment Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use this structure - IMPORTANT use single braces { } not double:
 @startuml
 node "User Devices" {
   node "Web Browser" as browser
@@ -762,12 +786,11 @@ lb --> "Web Server" : HTTP
 "App Server" --> primaryDB : JDBC
 primaryDB --> replicaDB : Replication
 @enduml
-Replace with infrastructure for 'PROJECT_NAME'. Use single braces { } only.""",
+Replace with infrastructure for 'PROJECT_NAME'. Use single braces only.""",
 
 "State Diagram":
 """Create a detailed PlantUML State Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use this structure - IMPORTANT use single braces { } not double:
 @startuml
 [*] --> Draft : Created
 state Draft
@@ -784,16 +807,14 @@ UnderReview --> Active : Approved
 UnderReview --> Draft : Rejected
 Active --> Completed : Finish
 Active --> Cancelled : Cancel
-Draft --> Cancelled : Cancel
 Completed --> [*]
 Cancelled --> [*]
 @enduml
-Replace with realistic states for 'PROJECT_NAME'. Use single braces { } only.""",
+Replace with realistic states for 'PROJECT_NAME'. Use single braces only.""",
 
 "Timing Diagram":
 """Create a detailed PlantUML Timing Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use exactly this syntax - timing diagrams do NOT use braces:
 @startuml
 robust "Client Browser" as CB
 concise "API Server" as API
@@ -818,19 +839,17 @@ API is Idle
 @400
 CB is Idle
 @enduml
-Replace with a realistic timeline for 'PROJECT_NAME'. No braces needed in timing diagrams.""",
+Replace with a realistic timeline for 'PROJECT_NAME'.""",
 
 "Entity Relationship Diagram":
 """Create a detailed PlantUML ER Diagram for a project called 'PROJECT_NAME'.
 Output ONLY the PlantUML code, starting with @startuml and ending with @enduml.
-Use this structure - IMPORTANT use single braces { } not double:
 @startuml
 entity "User" as users {
   * user_id : INT <<PK>>
   --
   * username : VARCHAR(50)
   * email : VARCHAR(100)
-  * password_hash : VARCHAR(255)
   created_at : DATETIME
 }
 entity "Product" as products {
@@ -839,7 +858,6 @@ entity "Product" as products {
   * name : VARCHAR(100)
   * price : DECIMAL(10,2)
   stock_qty : INT
-  category_id : INT <<FK>>
 }
 entity "Order" as orders {
   * order_id : INT <<PK>>
@@ -861,7 +879,7 @@ users ||--o{ orders : places
 orders ||--|{ order_items : contains
 products ||--o{ order_items : in
 @enduml
-Replace with 4-6 realistic entities for 'PROJECT_NAME'. Use single braces { } only.""",
+Replace with 4-6 realistic entities for 'PROJECT_NAME'. Use single braces only.""",
 }
 
 
@@ -877,7 +895,7 @@ GROQ_MODELS = [
 
 SYSTEM_PROMPT = (
     "You are a PlantUML expert. Follow the template provided exactly. "
-    "Use ONLY single braces { } in your output — never double braces {{ }}. "
+    "Use ONLY single braces { } — never double braces {{ }}. "
     "Do NOT add !theme directives. "
     "Output ONLY valid PlantUML starting with @startuml and ending with @enduml. "
     "No markdown fences, no explanations."
@@ -888,12 +906,10 @@ def call_groq(project_name, diagram_type):
         raise RuntimeError("GROQ_API_KEY not set. Add it to your .env file.")
     if not GROQ_KEY.startswith('gsk_'):
         raise RuntimeError("Invalid GROQ_API_KEY — must start with 'gsk_'.")
-
     template    = DIAGRAM_PROMPTS.get(diagram_type, "")
     user_prompt = template.replace('PROJECT_NAME', project_name)
     headers     = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
     last_error  = None
-
     for model in GROQ_MODELS:
         payload = {
             "model": model,
@@ -910,9 +926,9 @@ def call_groq(project_name, diagram_type):
                 headers=headers, json=payload, timeout=60,
             )
             if resp.status_code == 401:
-                raise RuntimeError("Groq API key rejected (401). Get a new key from console.groq.com.")
+                raise RuntimeError("Groq API key rejected (401).")
             if resp.status_code == 429:
-                raise RuntimeError("Groq rate limit (429). Wait a few seconds and try again.")
+                raise RuntimeError("Groq rate limit (429). Wait a few seconds.")
             if resp.status_code == 404:
                 last_error = f"Model {model} not available"; continue
             if not resp.ok:
@@ -924,59 +940,33 @@ def call_groq(project_name, diagram_type):
         except requests.Timeout:
             last_error = f"Timeout on {model}"
         except Exception as e:
-            last_error = str(e); logger.error("[groq] %s: %s", model, e)
-
+            last_error = str(e)
     raise RuntimeError(f"All Groq models failed. Last error: {last_error}.")
 
 def generate_ai_syntax(project_name, diagram_type, theme_name):
     raw             = call_groq(project_name, diagram_type)
     theme_skinparam = get_theme_skinparam(theme_name) if theme_name else ''
     block           = clean_syntax(raw, theme_skinparam)
-    # Final safety pass: ensure no double braces survived
-    block = block.replace('{{', '{').replace('}}', '}')
-    logger.info("[syntax] final block length=%d", len(block))
+    block           = block.replace('{{', '{').replace('}}', '}')
     return block
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Helpers
+# Auth helpers
 # ══════════════════════════════════════════════════════════════════════════════
-
-def load_json(fp, default):
-    return json.load(open(fp)) if os.path.exists(fp) else default
-
-def save_json(fp, data):
-    json.dump(data, open(fp, 'w'), indent=2)
-
-def load_users():  return load_json(USERS_FILE, {})
-def save_users(u): save_json(USERS_FILE, u)
 
 def hash_password(pw):
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
 
-def verify_password(pw, h):
-    try: return bcrypt.checkpw(pw.encode(), h.encode())
+def verify_password(pw, hashed):
+    try: return bcrypt.checkpw(pw.encode(), hashed.encode())
     except: return False
-
-def load_history(): return load_json(HISTORY_FILE, [])
-
-def save_history_entry(username, project, diagram_type, theme, syntax, image_path):
-    history = load_history()
-    entry   = {
-        'id': str(uuid.uuid4()), 'username': username,
-        'project': project, 'diagram_type': diagram_type,
-        'theme': theme or 'Default', 'syntax': syntax,
-        'image_path': image_path,
-        'created_at': datetime.datetime.utcnow().isoformat() + 'Z',
-    }
-    history.insert(0, entry)
-    save_json(HISTORY_FILE, history[:200])
-    return entry
 
 def login_required(f):
     @wraps(f)
     def dec(*a, **kw):
-        if 'username' not in session: return redirect(url_for('login'))
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
         return f(*a, **kw)
     return dec
 
@@ -990,45 +980,58 @@ def index(): return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if 'username' in session: return redirect(url_for('try_app'))
+    if 'user_id' in session: return redirect(url_for('try_app'))
     error = None
     if request.method == 'POST':
-        u = request.form.get('username','').strip()
-        p = request.form.get('password','')
-        ud = load_users().get(u)
-        if ud and verify_password(p, ud['password']):
-            session['username'] = u; session['email'] = ud.get('email','')
-            logger.info("Login: %s", u); return redirect(url_for('try_app'))
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        user     = User.query.filter_by(username=username).first()
+        if user and verify_password(password, user.password):
+            session['user_id']  = user.id
+            session['username'] = user.username
+            session['email']    = user.email
+            logger.info("Login: %s", username)
+            return redirect(url_for('try_app'))
         error = 'Invalid username or password.'
     return render_template('login.html', error=error)
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    if 'username' in session: return redirect(url_for('try_app'))
+    if 'user_id' in session: return redirect(url_for('try_app'))
     error = None
     if request.method == 'POST':
-        u = request.form.get('username','').strip()
-        e = request.form.get('email','').strip()
-        p = request.form.get('password','')
-        c = request.form.get('confirm_password','')
-        if not u or not e or not p:  error = 'All fields are required.'
-        elif p != c:                  error = 'Passwords do not match.'
-        elif len(p) < 6:             error = 'Password must be at least 6 characters.'
+        username = request.form.get('username', '').strip()
+        email    = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
+        confirm  = request.form.get('confirm_password', '')
+        if not username or not email or not password:
+            error = 'All fields are required.'
+        elif password != confirm:
+            error = 'Passwords do not match.'
+        elif len(password) < 6:
+            error = 'Password must be at least 6 characters.'
+        elif User.query.filter_by(username=username).first():
+            error = 'Username already taken.'
+        elif User.query.filter_by(email=email).first():
+            error = 'Email already registered.'
         else:
-            users = load_users()
-            if u in users: error = 'Username already taken.'
-            else:
-                users[u] = {'password': hash_password(p), 'email': e,
-                            'created_at': datetime.datetime.utcnow().isoformat()+'Z'}
-                save_users(users)
-                session['username'] = u; session['email'] = e
-                logger.info("Signup: %s", u); return redirect(url_for('try_app'))
+            user = User(username=username, email=email,
+                        password=hash_password(password))
+            db.session.add(user)
+            db.session.commit()
+            session['user_id']  = user.id
+            session['username'] = user.username
+            session['email']    = user.email
+            logger.info("Signup: %s", username)
+            return redirect(url_for('try_app'))
     return render_template('signup.html', error=error)
 
 @app.route('/logout')
 def logout():
-    u = session.pop('username','unknown'); session.clear()
-    logger.info("Logout: %s", u); return redirect(url_for('index'))
+    username = session.get('username', 'unknown')
+    session.clear()
+    logger.info("Logout: %s", username)
+    return redirect(url_for('index'))
 
 @app.route('/try')
 @login_required
@@ -1040,23 +1043,25 @@ def try_app():
 @app.route('/history')
 @login_required
 def history():
-    h = [x for x in load_history() if x['username'] == session['username']]
-    return render_template('history.html', history=h, username=session['username'])
+    user     = User.query.get(session['user_id'])
+    diagrams = Diagram.query.filter_by(user_id=user.id)\
+                      .order_by(Diagram.created_at.desc()).limit(100).all()
+    return render_template('history.html',
+        history=[d.to_dict() for d in diagrams],
+        username=session['username'])
 
 @app.route('/generate', methods=['POST'])
 @login_required
 def generate():
-    project_name = request.form.get('project_name','').strip()
-    diagram_type = request.form.get('diagram_type','').strip()
-    theme        = request.form.get('theme','').strip() or None
-
+    project_name = request.form.get('project_name', '').strip()
+    diagram_type = request.form.get('diagram_type', '').strip()
+    theme        = request.form.get('theme', '').strip() or None
     if not project_name or not diagram_type:
         return jsonify({'error': 'Project title and diagram type are required.'}), 400
     if diagram_type not in DIAGRAM_TYPES:
         return jsonify({'error': 'Invalid diagram type.'}), 400
     if theme and theme not in THEME_NAMES:
         theme = None
-
     try:
         logger.info("[generate] user=%s project=%s type=%s theme=%s",
                     session['username'], project_name, diagram_type, theme)
@@ -1064,15 +1069,25 @@ def generate():
         png_bytes = render_diagram(syntax)
         b64       = base64.b64encode(png_bytes).decode()
         fname     = f"{uuid.uuid4().hex}.png"
-        with open(os.path.join(app.config['UPLOAD_FOLDER'], fname), 'wb') as f:
+        with open(os.path.join(UPLOAD_FOLDER, fname), 'wb') as f:
             f.write(png_bytes)
-        entry = save_history_entry(session['username'], project_name,
-                                   diagram_type, theme, syntax, fname)
-        return jsonify({'diagram': b64, 'syntax': syntax, 'entry_id': entry['id']})
+        diagram = Diagram(
+            user_id      = session['user_id'],
+            project      = project_name,
+            diagram_type = diagram_type,
+            theme        = theme or 'Default',
+            syntax       = syntax,
+            image_path   = fname,
+        )
+        db.session.add(diagram)
+        db.session.commit()
+        return jsonify({'diagram': b64, 'syntax': syntax, 'entry_id': diagram.id})
     except RuntimeError as e:
-        logger.error("[generate] %s", e); return jsonify({'error': str(e)}), 500
+        logger.error("[generate] %s", e)
+        return jsonify({'error': str(e)}), 500
     except ValueError as e:
-        logger.error("[generate] %s", e); return jsonify({'error': str(e)}), 422
+        logger.error("[generate] %s", e)
+        return jsonify({'error': str(e)}), 422
     except Exception as e:
         logger.exception("[generate] %s", e)
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
@@ -1080,30 +1095,32 @@ def generate():
 @app.route('/api/history')
 @login_required
 def api_history():
-    h = [x for x in load_history() if x['username'] == session['username']]
-    return jsonify(h[:50])
+    diagrams = Diagram.query.filter_by(user_id=session['user_id'])\
+                      .order_by(Diagram.created_at.desc()).limit(50).all()
+    return jsonify([d.to_dict() for d in diagrams])
 
 @app.route('/api/history/<entry_id>', methods=['DELETE'])
 @login_required
 def delete_history_entry(entry_id):
-    history = load_history()
-    entry   = next((h for h in history if h['id']==entry_id
-                    and h['username']==session['username']), None)
-    if not entry: return jsonify({'error': 'Not found.'}), 404
-    img = os.path.join(app.config['UPLOAD_FOLDER'], entry['image_path'])
+    diagram = Diagram.query.filter_by(id=entry_id,
+                                      user_id=session['user_id']).first()
+    if not diagram:
+        return jsonify({'error': 'Not found.'}), 404
+    img = os.path.join(UPLOAD_FOLDER, diagram.image_path)
     if os.path.exists(img): os.remove(img)
-    save_json(HISTORY_FILE, [h for h in history if h['id']!=entry_id])
+    db.session.delete(diagram)
+    db.session.commit()
     return jsonify({'deleted': entry_id})
 
 @app.route('/static/diagrams/<path:filename>')
 def serve_diagram(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 @app.route('/health')
 def health():
-    return jsonify({'status':'ok','timestamp':datetime.datetime.utcnow().isoformat()})
+    return jsonify({'status': 'ok', 'timestamp': datetime.datetime.utcnow().isoformat()})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0',
             port=int(os.environ.get('PORT', 5000)),
-            debug=os.environ.get('FLASK_ENV','development')=='development')
+            debug=os.environ.get('FLASK_ENV', 'development') == 'development')
